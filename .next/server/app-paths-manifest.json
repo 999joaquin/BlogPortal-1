@@ -1,0 +1,7 @@
+{
+  "/kategori/[slug]/page": "app/kategori/[slug]/page.js",
+  "/admin/login/page": "app/admin/login/page.js",
+  "/admin/dashboard/page": "app/admin/dashboard/page.js",
+  "/admin/kategori/page": "app/admin/kategori/page.js",
+  "/admin/artikel/page": "app/admin/artikel/page.js"
+}

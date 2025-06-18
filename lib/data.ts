@@ -1,0 +1,455 @@
+import mysql from "mysql2/promise"
+
+const dbConfig = {
+  host: process.env.DB_HOST || "shinkansen.proxy.rlwy.net",
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASSWORD || "BnpLHeRPpOhBnsBnIFGUqnDhyAAbvKXP",
+  database: process.env.DB_NAME || "blog_system",
+  port: Number.parseInt(process.env.DB_PORT || "38143"),
+}
+
+async function getConnection() {
+  return await mysql.createConnection(dbConfig)
+}
+
+export async function getLatestArticles(limit = 7) {
+  const connection = await getConnection()
+  try {
+    // Use string interpolation for LIMIT instead of parameter binding
+    const [rows] = await connection.execute(
+      `
+      SELECT 
+        a.id, a.title, a.slug, a.excerpt, a.image_url, a.created_at,
+        au.name as author_name,
+        c.name as category_name, c.id as category_id
+      FROM articles a
+      JOIN authors au ON a.author_id = au.id
+      JOIN categories c ON a.category_id = c.id
+      WHERE a.status = 'published'
+      ORDER BY a.created_at DESC
+      LIMIT ${Number.parseInt(limit)}
+    `,
+    )
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getArticleBySlug(slug: string) {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(
+      `
+      SELECT 
+        a.id, a.title, a.slug, a.excerpt, a.content, a.image_url, a.created_at,
+        au.name as author_name,
+        c.name as category_name, c.id as category_id
+      FROM articles a
+      JOIN authors au ON a.author_id = au.id
+      JOIN categories c ON a.category_id = c.id
+      WHERE a.slug = ? AND a.status = 'published'
+    `,
+      [slug],
+    )
+    return rows[0] || null
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getCategories() {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(`
+      SELECT 
+        c.id, c.name, c.slug,
+        COUNT(a.id) as article_count
+      FROM categories c
+      LEFT JOIN articles a ON c.id = a.category_id AND a.status = 'published'
+      GROUP BY c.id, c.name, c.slug
+      ORDER BY c.name
+    `)
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getCategoryBySlug(slug: string) {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(
+      `
+      SELECT id, name, slug, description
+      FROM categories
+      WHERE slug = ?
+    `,
+      [slug],
+    )
+    return rows[0] || null
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getArticlesByCategory(categoryId: number) {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(
+      `
+      SELECT 
+        a.id, a.title, a.slug, a.excerpt, a.image_url, a.created_at,
+        au.name as author_name,
+        c.name as category_name, c.id as category_id
+      FROM articles a
+      JOIN authors au ON a.author_id = au.id
+      JOIN categories c ON a.category_id = c.id
+      WHERE a.category_id = ? AND a.status = 'published'
+      ORDER BY a.created_at DESC
+    `,
+      [categoryId],
+    )
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getRelatedArticles(categoryId: number, excludeId: number) {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(
+      `
+      SELECT 
+        a.id, a.title, a.slug, a.created_at
+      FROM articles a
+      WHERE a.category_id = ? AND a.id != ? AND a.status = 'published'
+      ORDER BY a.created_at DESC
+      LIMIT 5
+    `,
+      [categoryId, excludeId],
+    )
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getStats() {
+  const connection = await getConnection()
+  try {
+    const [articleRows] = await connection.execute("SELECT COUNT(*) as count FROM articles")
+    const [categoryRows] = await connection.execute("SELECT COUNT(*) as count FROM categories")
+    const [authorRows] = await connection.execute("SELECT COUNT(*) as count FROM authors")
+
+    return {
+      articles: articleRows[0].count,
+      categories: categoryRows[0].count,
+      authors: authorRows[0].count,
+    }
+  } finally {
+    await connection.end()
+  }
+}
+
+// Admin functions
+export async function getAuthors() {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(`
+      SELECT id, name, email, bio, created_at
+      FROM authors
+      ORDER BY name
+    `)
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function createAuthor(data: { name: string; email: string; bio?: string }) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      INSERT INTO authors (name, email, bio)
+      VALUES (?, ?, ?)
+    `,
+      [data.name, data.email, data.bio || null],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function updateAuthor(id: number, data: { name: string; email: string; bio?: string }) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      UPDATE authors 
+      SET name = ?, email = ?, bio = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+      [data.name, data.email, data.bio || null, id],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function deleteAuthor(id: number) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute("DELETE FROM authors WHERE id = ?", [id])
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getAllCategories() {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(`
+      SELECT id, name, slug, description, created_at
+      FROM categories
+      ORDER BY name
+    `)
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function createCategory(data: { name: string; slug: string; description?: string }) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      INSERT INTO categories (name, slug, description)
+      VALUES (?, ?, ?)
+    `,
+      [data.name, data.slug, data.description || null],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function updateCategory(id: number, data: { name: string; slug: string; description?: string }) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      UPDATE categories 
+      SET name = ?, slug = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+      [data.name, data.slug, data.description || null, id],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function deleteCategory(id: number) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute("DELETE FROM categories WHERE id = ?", [id])
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function getAllArticles() {
+  const connection = await getConnection()
+  try {
+    const [rows] = await connection.execute(`
+      SELECT 
+        a.id, a.title, a.slug, a.excerpt, a.content, a.image_url, 
+        a.status, a.created_at, a.author_id, a.category_id,
+        au.name as author_name,
+        c.name as category_name
+      FROM articles a
+      JOIN authors au ON a.author_id = au.id
+      JOIN categories c ON a.category_id = c.id
+      ORDER BY a.created_at DESC
+    `)
+    return rows
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function createArticle(data: {
+  title: string
+  slug: string
+  excerpt: string
+  content: string
+  image_url?: string
+  author_id: number
+  category_id: number
+  status: "draft" | "published"
+}) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      INSERT INTO articles (title, slug, excerpt, content, image_url, author_id, category_id, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+      [
+        data.title,
+        data.slug,
+        data.excerpt,
+        data.content,
+        data.image_url || null,
+        data.author_id,
+        data.category_id,
+        data.status,
+      ],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function updateArticle(
+  id: number,
+  data: {
+    title: string
+    slug: string
+    excerpt: string
+    content: string
+    image_url?: string
+    author_id: number
+    category_id: number
+    status: "draft" | "published"
+  },
+) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute(
+      `
+      UPDATE articles 
+      SET title = ?, slug = ?, excerpt = ?, content = ?, image_url = ?, 
+          author_id = ?, category_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+      [
+        data.title,
+        data.slug,
+        data.excerpt,
+        data.content,
+        data.image_url || null,
+        data.author_id,
+        data.category_id,
+        data.status,
+        id,
+      ],
+    )
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function deleteArticle(id: number) {
+  const connection = await getConnection()
+  try {
+    const [result] = await connection.execute("DELETE FROM articles WHERE id = ?", [id])
+    return result
+  } finally {
+    await connection.end()
+  }
+}
+
+export async function searchArticles(query: string, categorySlug?: string, page = 1, limit = 10) {
+  const connection = await getConnection()
+  try {
+    const offset = (page - 1) * limit
+    const searchTerm = `%${query}%`
+
+    let searchQuery = `
+      SELECT 
+        a.id, a.title, a.slug, a.excerpt, a.image_url, a.created_at,
+        au.name as author_name,
+        c.name as category_name, c.id as category_id, c.slug as category_slug
+      FROM articles a
+      JOIN authors au ON a.author_id = au.id
+      JOIN categories c ON a.category_id = c.id
+      WHERE a.status = 'published'
+      AND (
+        a.title LIKE ? OR 
+        a.excerpt LIKE ? OR 
+        a.content LIKE ?
+      )
+    `
+
+    const queryParams = [searchTerm, searchTerm, searchTerm]
+
+    if (categorySlug && categorySlug !== "all") {
+      searchQuery += " AND c.slug = ?"
+      queryParams.push(categorySlug)
+    }
+
+    // Use string interpolation for LIMIT and OFFSET
+    searchQuery += ` ORDER BY a.created_at DESC LIMIT ${limit} OFFSET ${offset}`
+
+    const [articles] = await connection.execute(searchQuery, queryParams)
+
+    // Get total count
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM articles a
+      JOIN categories c ON a.category_id = c.id
+      WHERE a.status = 'published'
+      AND (
+        a.title LIKE ? OR 
+        a.excerpt LIKE ? OR 
+        a.content LIKE ?
+      )
+    `
+
+    const countParams = [searchTerm, searchTerm, searchTerm]
+
+    if (categorySlug && categorySlug !== "all") {
+      countQuery += " AND c.slug = ?"
+      countParams.push(categorySlug)
+    }
+
+    const [countResult] = await connection.execute(countQuery, countParams)
+    const total = countResult[0].total
+
+    return {
+      articles,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    }
+  } finally {
+    await connection.end()
+  }
+}
+
+// Test function to check if database is working
+export async function testConnection() {
+  try {
+    const connection = await getConnection()
+    await connection.execute("SELECT 1")
+    await connection.end()
+    return true
+  } catch (error) {
+    console.error("Database connection failed:", error)
+    return false
+  }
+}
